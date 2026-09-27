@@ -1,6 +1,6 @@
 # National data snapshot
 
-This directory contains the reviewed, schema-validated national discovery snapshot. It currently has 1,286 projects: all 1,024 rows from ISO-NE's June 2026 Regional System Plan list and 262 current GridBridge filing projects. The 69 exposed centers all come from current legacy records whose location evidence remains eligible after the source audit. ISO-NE supplies no county or coordinate columns. Legacy records do not contain reviewed project state or county assignments. All current project counties and all legacy project states therefore remain unknown rather than inferred.
+This directory contains the reviewed, schema-validated national discovery snapshot. The unchanged base has 1,286 projects: all 1,024 rows from ISO-NE's June 2026 Regional System Plan list and 262 current GridBridge filing projects. Its 69 base centers all come from current legacy records whose location evidence remains eligible after the source audit. ISO-NE supplies no county or coordinate columns. Legacy records do not contain reviewed project state or county assignments. All current project counties and all legacy project states therefore remain unknown rather than inferred.
 
 `sources.json` records 26 source entries. Eleven regional planning pages are catalogued only; their pages were verified, but no project count or geographic footprint is inferred. EIA-861 and FERC material is also reference-only. The snapshot does not claim nationwide project completeness or utility service-territory coverage.
 
@@ -18,3 +18,35 @@ uv run python -m national.load
 `national.load` is validation-only when `MONGODB_URI_RW` is absent. The existing GitHub `load` Action is the only place that supplies the write URI. It writes only the isolated national collections, persists candidate coverage, and then activates `meta._id = national_active`; later status or retention-cleanup failures are reported as warnings without claiming that activation was rolled back. It does not modify the legacy active dataset. Local commands validate without write credentials, and no live Atlas load is claimed by the committed evidence.
 
 `geography.json` contains the full Census reference hierarchy, 2026 Gazetteer names and representative points, and 2025 cartographic boundary bounds. Those reference coordinates frame filters and labels; they are never substituted for project locations. `coverage.json` reports imported denominators and unknown fields so consumers can distinguish measured zero from unavailable data.
+
+## Reviewed expansion locations
+
+`national.build.load_snapshot` first validates these base files, then applies these fixed releases in order:
+
+1. New England locations: `data/expansion/releases/active.json` (C23).
+2. Southeast additions: `data/southeast/releases/active.json` (C27).
+3. Mid-Atlantic additions: `data/expansion/mid-atlantic/releases/active.json` (C28).
+4. Texas: `data/texas/statewide/releases/active.json` (C32) when present; otherwise
+   `data/texas/releases/active.json` (C29). One exclusive slot; an invalid statewide release fails the load.
+
+Each producer validates its facts-bound release. The loader recomputes source/total
+coverage and validates the assembled snapshot before the national loader can stage it. Missing active releases
+leave the base unchanged; invalid releases fail before staging. Candidate and research folders never activate.
+
+Expansion geometry and its source/review evidence are embedded in the same national project document and move
+with the existing atomic dataset pointer. Project IDs, original source rows, statuses and milestone precision
+remain unchanged. Runtime `coverage.expansion`, `coverage.southeast`, `coverage.mid_atlantic` and `coverage.texas` preserve
+each producer’s coverage, review counts and gaps separately from the recomputed national totals.
+The workbook still supplies no coordinates; separate reviewed evidence supplies any accepted ISO-NE locations.
+`national build` continues to write base snapshots only, so repeated loads do not bake overlays into originals.
+
+The statewide Texas release contains 2,044 ERCOT TPIT projects from 2,049 observations: 635 tentative facility
+locations (183 full, 452 partial), 1,218 county-reference projects and 191 unlocated. Its 1,407 county anchors
+preserve all named counties under the existing project IDs. Exact centers and indexed `geo` remain null for
+county-only projects; the separate attributed anchors may display labeled approximate dots. OSM-derived
+facility references retain © OpenStreetMap contributors / ODbL 1.0 attribution. These records never create
+national overlap pairs. F41 validates source rows, unique IDs, ledger links/hashes, geometry and tier counts.
+The unchanged C29 fallback contains eight candidate projects at five centers. Removing only the statewide
+activation manifest restores that fallback on the next load, without double-counting Texas native IDs.
+The main-only load Action is triggered by this data documentation change; its receipt and the active Atlas
+dataset still need verification before calling the batch loaded or visible.

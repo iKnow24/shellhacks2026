@@ -26,3 +26,40 @@ Follow Plans B and D's source, provenance, uncertainty and sponsor-rule requirem
 ## Validation
 
 Meaningful tests cover source-row parsing and page/row citations, changed headers, uncertain dates, unknown/ambiguous owner and geography, leading-zero codes, duplicate IDs, missing geometry, unsafe downloads, deterministic replay, failed-load activation and idempotency. Validate a real retrieved snapshot and inspect representative rows against the official file. Run repo-wide checks. Document actual coverage and unimplemented adapters in `data/national/README.md`.
+
+## Reviewed location publication (C23)
+
+Validate the committed base, apply F38's fixed `data/expansion/releases/active.json` in memory, recompute national
+and per-source coverage, and validate the assembled result before staging. Missing releases preserve the base;
+invalid releases fail closed. Preserve F38's expansion summary and embed its evidence under the same national
+dataset pointer. `build_snapshot` continues to emit only original base observations, never an applied overlay.
+
+## Southeast additions (C27)
+
+After the validated base and optional C23 overlay, invoke F39's fixed-path assembler for
+`data/southeast/releases/active.json`. Recompute national and per-source coverage and validate
+the combined snapshot before staging. Preserve both producer summaries, project events and
+location evidence. Missing active releases leave the original base behavior intact; invalid
+Southeast releases must prevent activation. The existing load Action remains the sole writer.
+
+## Mid-Atlantic additions (C28)
+
+After C23 and C27, invoke F38’s `expansion.mid_atlantic.apply_release` only when
+`data/expansion/mid-atlantic/releases/active.json` exists. Pass the full assembled snapshot,
+preserve all producer summaries and evidence, recompute national and per-source coverage,
+and validate before staging. Missing releases preserve prior behavior; invalid releases
+prevent activation. Original snapshot generation and the sole load Action writer are unchanged.
+
+## Texas release (C29 / C32)
+
+After the existing overlays, use `texas.statewide_publish.apply_release` when the fixed
+`data/texas/statewide/releases/active.json` exists; otherwise use `texas.publish.apply_release` for the
+unchanged eight-project `data/texas/releases/active.json`. Select one Texas slot, never both. An invalid
+statewide release fails before staging; it cannot silently fall back to C29. Removing the statewide activation
+file restores the eight-project fallback on the next load. Missing both preserves the original snapshot.
+
+Recompute aggregate and per-source coverage and validate the final snapshot before staging. Preserve the
+2,044 statewide identities, raw source rows, candidate labels, OSM attribution and county display anchors.
+County-only records retain null exact centers and null indexed `geo`; their separate anchors are display
+references. Candidate and approximate references generate no national overlap pairs. The existing load
+Action remains the sole writer; verify its receipt and the active read-only dataset separately from UI rendering.

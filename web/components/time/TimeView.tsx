@@ -4,6 +4,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MlMap } from "maplibre-gl";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { NationalProject, NationalSource, NationalExplorerPayload } from "@/lib/national/types";
+import { NationalProjectEvidence } from "./NationalProjectEvidence";
 import type { InService, Utility, View } from "@/lib/types";
 import type { Emphasis, LabelSpec, Projected, SweepState, TimeItem, TimeLayer } from "./timeLayer";
 import { DAYS_PER_YEAR, dayOf, epochYear, fmtDays, span, type Span } from "./timeScale";
@@ -19,6 +21,7 @@ export interface TimeProject {
   confidence: "high" | "medium" | "low" | null;
   source_id: string;
   page: number | null;
+  national?: { project: NationalProject; source?: NationalSource };
 }
 export interface TimePair {
   id: string;
@@ -36,8 +39,9 @@ const STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 const COLOR: Record<Utility, string> = { DESC: "#5cc8ff", GPC: "#ffae42", unknown: "#8b93a7" };
 const UTILITY: Record<Utility, string> = { DESC: "Dominion Energy SC", GPC: "Georgia Power", unknown: "Owner not mapped" };
 /** An unmapped owner still has a filed code (MEAG, GTC ...); say which, and that it isn't matched to a utility. */
-const owner = (p: { utility: Utility; owner_code: string | null }) =>
-  p.utility === "unknown" && p.owner_code ? `Owner code ${p.owner_code}, not mapped` : UTILITY[p.utility];
+const owner = (p: TimeProject) =>
+  p.national ? (p.national.project.owner ?? "Owner unknown") : p.utility === "unknown" && p.owner_code ? `Owner code ${p.owner_code}, not mapped` : UTILITY[p.utility];
+const projectColor = (p: TimeProject) => p.national ? "#88dbc1" : COLOR[p.utility];
 const VIEWS: { v: View; label: string; help: string }[] = [
   { v: "future", label: "Future", help: "Both dates exact and on or after the analysis date" },
   { v: "historical", label: "Historical", help: "At least one in-service date before the analysis date" },
@@ -49,6 +53,8 @@ const REVIEW: Record<string, string> = {
   rejected: "Not confirmed by audit",
 };
 const miles = (d: number) => `${d.toFixed(2)} mi`;
+/** F37: History opens around this project's stored center, as a research aid. */
+const pastWork = (key: string) => `/history?origin=${encodeURIComponent(key)}`;
 const SWEEP_MS = 4200;
 const BOOTH_IDLE_MS = 25_000;
 /** 25 statute miles in degrees of latitude (1° ≈ 69.05 mi), to place the rule's label on its circle. */
@@ -77,7 +83,14 @@ function overviewPadding(el: HTMLElement | null) {
   const h = el?.clientHeight ?? 800;
   return w <= 860
     ? { top: 70, bottom: Math.round(h * 0.5), left: 12, right: 96 }
-    : { top: 60, bottom: 150, left: Math.min(460, w * 0.34), right: 250 };
+    : { top: 60, bottom: 150, left: Math.min(460, w * 0.34), right: 420 };
+}
+
+/** Drawing only: a date before the axis ground lies on the ground; a span crossing it starts at the ground. */
+function clampToGround(sp: Span): Span {
+  if (sp.kind === "exact") return sp.day < 0 ? { kind: "unknown" } : sp;
+  if (sp.kind === "range") return sp.to <= 0 ? { kind: "unknown" } : sp.from < 0 ? { ...sp, from: 0 } : sp;
+  return sp;
 }
 
 function describe(sp: Span, raw: string | null): string {
@@ -91,11 +104,18 @@ export function TimeView({
   pairs,
   analysisDate,
   fixtureMode,
+  national,
+  legacyAvailable,
+  pairsAvailable,
 }: {
   projects: TimeProject[];
   pairs: TimePair[];
   analysisDate: string;
   fixtureMode: boolean;
+  legacyAvailable: boolean;
+  pairsAvailable: boolean;
+  national: { available: boolean; mode: NationalExplorerPayload["mode"]; dataset: string | null;
+    drawn: number; inService: number; unlocated: number; truncated: boolean };
 }) {
   const counts = useMemo(
     () => Object.fromEntries(VIEWS.map(({ v }) => [v, pairs.filter((p) => p.view === v).length])) as Record<View, number>,
@@ -112,6 +132,7 @@ export function TimeView({
   const [ready, setReady] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
+  const [projectQuery, setProjectQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const [tour, setTour] = useState<number | null>(null);
   const [asOf, setAsOf] = useState<number | null>(null);
@@ -136,21 +157,37 @@ export function TimeView({
   // --- facts, derived once --------------------------------------------------------------------------------------------
   const byKey = useMemo(() => new Map(projects.map((p) => [p.key, p])), [projects]);
   const located = useMemo(() => projects.filter((p) => p.center), [projects]);
-  const epoch = useMemo(() => epochYear(located.map((p) => p.in_service)), [located]);
+  // The planning window: the ground is 1 Jan of the year before the analysis date (or the earliest drawn year, if
+  // later), so one old filing can't stretch the axis. Earlier dates keep their facts and lie flat on the ground.
+  const analysisYear = Number(analysisDate.slice(0, 4));
+  const epoch = useMemo(() => Math.max(Math.min(epochYear(located.map((p) => p.in_service)), analysisYear), analysisYear - 1), [located, analysisYear]);
   const spans = useMemo(() => new Map(located.map((p) => [p.key, span(p.in_service, epoch)])), [located, epoch]);
+  const drawn = useMemo(() => new Map([...spans].map(([k, sp]) => [k, clampToGround(sp)])), [spans]);
+  const beforeGround = located.filter((p) => spans.get(p.key)?.kind !== "unknown" && drawn.get(p.key)?.kind === "unknown").length;
   const todayYears = dayOf(analysisDate, epoch) / DAYS_PER_YEAR;
   const hasRanges = [...spans.values()].some((sp) => sp.kind === "range");
   const undated = located.filter((p) => spans.get(p.key)?.kind === "unknown");
+  const sources = useMemo(() => [...new Set(projects.map((p) => p.source_id))].sort(), [projects]);
+  // The drawer lists every current project: the drawn ones and the ones that can't be placed yet.
+  const listed = useMemo(() => {
+    const q = projectQuery.trim().toLowerCase();
+    const hit = (p: TimeProject) => !q || p.name.toLowerCase().includes(q) || p.key.toLowerCase().includes(q);
+    const byName = (a: TimeProject, b: TimeProject) => a.name.localeCompare(b.name);
+    return {
+      drawn: located.filter(hit).sort(byName),
+      unplaced: projects.filter((p) => !p.center && hit(p)).sort(byName),
+    };
+  }, [projects, located, projectQuery]);
   const notLocated = projects.length - located.length;
   const items: TimeItem[] = useMemo(
     () =>
-      located.map((p) => ({ key: p.key, color: COLOR[p.utility], lng: p.center!.lon, lat: p.center!.lat, span: spans.get(p.key)! })),
-    [located, spans],
+      located.map((p) => ({ key: p.key, color: projectColor(p), lng: p.center!.lon, lat: p.center!.lat, span: drawn.get(p.key)! })),
+    [located, drawn],
   );
   const topYears = useMemo(() => {
-    const tops = [...spans.values()].map((sp) => (sp.kind === "exact" ? sp.day : sp.kind === "range" ? sp.to : 0));
+    const tops = [...drawn.values()].map((sp) => (sp.kind === "exact" ? sp.day : sp.kind === "range" ? sp.to : 0));
     return Math.max(todayYears, ...tops.map((d) => d / DAYS_PER_YEAR), 1);
-  }, [spans, todayYears]);
+  }, [drawn, todayYears]);
   useEffect(() => {
     epochRef.current = epoch;
     topYearsRef.current = topYears;
@@ -263,7 +300,12 @@ export function TimeView({
           setReady(true);
         });
       } catch (err) {
-        setFailure(`3D view unavailable (${err instanceof Error ? err.message : "WebGL failed"}). The pair list still works.`);
+        const msg = err instanceof Error ? err.message : "";
+        setFailure(
+          /webgl/i.test(msg) || !msg
+            ? "3D view unavailable: this browser has no WebGL2. The pair list, pair details and All projects still work."
+            : `3D view unavailable (${msg.slice(0, 120)}). The pair list still works.`,
+        );
       }
     })();
     return () => {
@@ -325,7 +367,7 @@ export function TimeView({
     return { lng: bbox[2] + 0.35, lat: bbox[1] + (bbox[3] - bbox[1]) * 0.42 };
   }, [pa, pb, bbox]);
 
-  const dimension = pair && pair.time_gap_days !== null && spans.get(pair.a)?.kind === "exact" && spans.get(pair.b)?.kind === "exact";
+  const dimension = pair && pair.time_gap_days !== null && drawn.get(pair.a)?.kind === "exact" && drawn.get(pair.b)?.kind === "exact";
 
   useEffect(() => {
     const layer = layerRef.current;
@@ -373,7 +415,7 @@ export function TimeView({
 
   // --- labels: React owns their content, the layer moves them every frame ---------------------------------------------
   const heightOf = (key: string) => {
-    const sp = spans.get(key);
+    const sp = drawn.get(key);
     return sp?.kind === "exact" ? sp.day / DAYS_PER_YEAR : sp?.kind === "range" ? sp.to / DAYS_PER_YEAR : 0;
   };
   const labelSpecs: (LabelSpec & { text: React.ReactNode; kind: string })[] = [];
@@ -423,7 +465,7 @@ export function TimeView({
       text: (
         <>
           <b>
-            <i style={{ background: COLOR[hovered.utility] }} />
+            <i style={{ background: projectColor(hovered) }} />
             {hovered.name}
           </b>
           <span>
@@ -477,7 +519,7 @@ export function TimeView({
       const p = id ? pairs.find((x) => x.id === id) : null;
       if (p) {
         const tops = [p.a, p.b].map((k) => {
-          const sp = spans.get(k);
+          const sp = drawn.get(k);
           return sp?.kind === "exact" ? sp.day : sp?.kind === "range" ? sp.to : 0;
         });
         const years = Math.max(...tops, 1) / DAYS_PER_YEAR;
@@ -486,7 +528,7 @@ export function TimeView({
         frame(byKey.get(p.a), byKey.get(p.b));
       }
     },
-    [pairs, byKey, frame, spans],
+    [pairs, byKey, frame, drawn],
   );
 
   useEffect(() => {
@@ -573,6 +615,7 @@ export function TimeView({
         return;
       }
       if (e.key === "Escape") {
+        setTrayOpen(false);
         if (tourTimer.current) window.clearTimeout(tourTimer.current);
         setTour(null);
         setPairId(null);
@@ -705,7 +748,7 @@ export function TimeView({
 
   // --- render ---------------------------------------------------------------------------------------------------------
   return (
-    <main className={s.stage}>
+    <main className={s.stage} data-national-dataset={national.dataset ?? undefined}>
       <div
         ref={container}
         className={s.map}
@@ -724,7 +767,8 @@ export function TimeView({
             ? `Selected project: ${project.name}.`
             : ""}
       </p>
-      <div className={s.labels} aria-hidden>
+      {/* Labels ride on the 3D layer; without it they have nowhere to be. */}
+      <div className={s.labels} aria-hidden hidden={!!failure}>
         {labelSpecs.map((l) => (
           <div
             key={l.id}
@@ -755,7 +799,7 @@ export function TimeView({
             <dd>{located.length}</dd>
           </div>
           <div>
-            <dt>Not located</dt>
+            <dt>Legacy unlocated</dt>
             <dd>{notLocated}</dd>
           </div>
           <div>
@@ -763,6 +807,22 @@ export function TimeView({
             <dd>1 Jan {epoch}</dd>
           </div>
         </dl>
+        <p className={s.provenance}>
+          Analysis date <b>{fmtDate(analysisDate)}</b>
+        </p>
+        <details className={s.provenance}>
+          <summary>{sources.length} sources</summary>
+          {sources.map((id) => <div key={id}><code>{id}</code></div>)}
+        </details>
+        {!legacyAvailable ? <p role="status" className={s.provenance}>Legacy projects unavailable; national projects remain available.</p> : null}
+        <p className={s.provenance}>
+          {national.available ? <>{national.drawn} confirmed national projects not yet in service included.
+            {national.inService ? <> {national.inService} already in service are in <Link href="/history">History →</Link></> : null}
+            {national.mode === "snapshot" ? " Committed snapshot mode." : ""}
+            {national.truncated ? " National map limit reached; more records are available in the explorer." : ""}
+          </> : "National projects unavailable; showing the legacy dataset."}
+          {" "}<Link href="/explore">Explore national records{national.available ? ` (${national.unlocated} unlocated)` : ""} →</Link>
+        </p>
         <button type="button" className={s.play} onClick={() => (tour === null ? goStep(0) : stopTour())} disabled={!ready}>
           <span aria-hidden>{tour === null ? "▶" : "■"}</span> {tour === null ? "Play the story" : "Stop the story"}
         </button>
@@ -822,7 +882,7 @@ export function TimeView({
           </ol>
         ) : (
           <div className={s.empty}>
-            <p>No {view} pairs in this data. Zero is a valid result, not a failure to look.</p>
+            <p>{pairsAvailable ? `No ${view} pairs in this data. Zero is a valid result, not a failure to look.` : "Legacy overlap pairs unavailable. Project discovery remains available."}</p>
             {VIEWS.filter(({ v }) => v !== view && counts[v] > 0).map(({ v, label }) => (
               <button key={v} type="button" onClick={() => changeView(v)}>
                 Show {label.toLowerCase()} ({counts[v]}) →
@@ -832,40 +892,97 @@ export function TimeView({
         )}
         <p className={s.footnote}>Priority order as stored: nearer band first, then the smaller exact day gap.</p>
       </nav>
-      <section className={s.tray} aria-label="What is not drawn">
-        <button type="button" onClick={() => setTrayOpen((o) => !o)} aria-expanded={trayOpen}>
-          <span>Not drawn</span>
-          <b>{notLocated}</b> without a located endpoint
+      <section className={s.tray} aria-label="All projects">
+        <button type="button" onClick={() => setTrayOpen((o) => !o)} aria-expanded={trayOpen} aria-controls="all-projects">
+          <span>Projects</span>
+          <b>{located.length}</b> drawn · <b>{notLocated}</b> not located
           {undated.length ? (
             <>
               {" "}
-              · <b>{undated.length}</b> without an exact date
+              · <b>{undated.length}</b> no exact date
             </>
           ) : null}
+          {beforeGround ? (
+            <>
+              {" "}
+              · <b>{beforeGround}</b> dated before {epoch}, on the ground
+            </>
+          ) : null}
+          <i aria-hidden>{trayOpen ? "×" : "→"}</i>
         </button>
-        {trayOpen ? (
-          <div className={s.trayBody}>
-            <p>
-              A project needs at least one located endpoint to stand on the map. {notLocated} current projects have none yet,
-              so they are listed on the overlap page but not drawn here.
-            </p>
-            {undated.length ? (
-              <>
-                <p>Located, but the filing gives no single date. They sit on the ground with no height:</p>
-                <ul>
-                  {undated.map((p) => (
-                    <li key={p.key}>
-                      <b>{p.name}</b> · “{p.in_service.raw ?? "no date"}”
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-          </div>
-        ) : null}
       </section>
       </div>
 
+
+      {trayOpen ? (
+        <aside className={s.drawer} id="all-projects" aria-label="All projects">
+          <header className={s.drawerHead}>
+            <h2>All projects</h2>
+            <button type="button" className={s.close} onClick={() => setTrayOpen(false)} aria-label="Close all projects">
+              ×
+            </button>
+          </header>
+          <p className={s.drawerNote}>
+            Legacy projects and confirmed national map points. Unlocated legacy projects are listed below.
+            Other national records remain searchable in the national explorer.
+          </p>
+          <input
+            type="search"
+            className={s.drawerSearch}
+            placeholder="Filter by name or ID"
+            value={projectQuery}
+            onChange={(e) => setProjectQuery(e.target.value)}
+            aria-label="Filter projects by name or ID"
+          />
+          <div className={s.drawerBody}>
+            <h3>
+              Drawn <span>{listed.drawn.length}</span>
+            </h3>
+            <ul>
+              {listed.drawn.map((p) => (
+                <li key={p.key}>
+                  <button
+                    type="button"
+                    aria-pressed={p.key === projectKey}
+                    onClick={() => {
+                      setPairId(null);
+                      setProjectKey(p.key);
+                      setTrayOpen(false);
+                      stopTour();
+                      mapRef.current?.easeTo({
+                        center: [p.center!.lon, p.center!.lat],
+                        zoom: Math.max(mapRef.current.getZoom(), 7.5),
+                        duration: reduced.current ? 0 : 900,
+                      });
+                    }}
+                  >
+                    <i style={{ background: projectColor(p) }} />
+                    <b>{p.name}</b>
+                    <span>
+                      {describe(spans.get(p.key) ?? { kind: "unknown" }, p.in_service.raw)} · <code>{p.key}</code>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <h3>
+              Legacy unlocated <span>{listed.unplaced.length}</span>
+            </h3>
+            <ul>
+              {listed.unplaced.map((p) => (
+                <li key={p.key} className={s.unplaced}>
+                  <i style={{ background: projectColor(p) }} />
+                  <b>{p.name}</b>
+                  <span>
+                    {p.in_service.raw ? `filed “${p.in_service.raw}”` : "no date filed"} · <code>{p.key}</code> ·{" "}
+                    <em className="unknown">no located endpoint</em>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
+      ) : null}
 
       {pair && pa && pb ? (
         <aside className={s.detail} aria-label="Selected pair" key={pair.id} ref={detailRef}>
@@ -894,6 +1011,9 @@ export function TimeView({
                 {p.source_id}
                 {p.page !== null ? ` p. ${p.page}` : ""} · location {p.confidence ?? "unknown"} confidence
               </p>
+              <Link href={pastWork(p.key)} className={s.evidence}>
+                Past work nearby →
+              </Link>
             </section>
           ))}
           <div className={s.detailFoot}>
@@ -922,18 +1042,21 @@ export function TimeView({
           <button type="button" className={s.close} onClick={() => setProjectKey(null)} aria-label="Close project">
             ×
           </button>
-          <section className={s.proj} style={{ ["--c" as string]: COLOR[project.utility] }}>
+          <section className={s.proj} style={{ ["--c" as string]: projectColor(project) }}>
             <p className={s.projUtil}>{owner(project)}</p>
             <h2>{project.name}</h2>
-            <p>In service {describe(spans.get(project.key) ?? { kind: "unknown" }, project.in_service.raw)}</p>
-            <p className={s.src}>
+            <p>Filed in-service milestone: {describe(spans.get(project.key) ?? { kind: "unknown" }, project.in_service.raw)}</p>
+            {!project.national ? <p className={s.src}>
               {project.source_id}
               {project.page !== null ? ` p. ${project.page}` : ""} · location {project.confidence ?? "unknown"} confidence
-            </p>
+            </p> : null}
           </section>
-          <p className={s.note}>
+          {project.national ? <NationalProjectEvidence {...project.national} dataset={national.dataset} /> : <p className={s.note}>
             {related.size ? `In ${related.size - 1} ${view} pair${related.size === 2 ? "" : "s"}; linked projects glow.` : `Not in any ${view} pair.`}
-          </p>
+          </p>}
+          <Link href={pastWork(project.key)} className={s.evidence}>
+            Find past work nearby in History →
+          </Link>
         </aside>
       ) : null}
 
@@ -954,6 +1077,7 @@ export function TimeView({
             <i className={s.gDim} /> Day gap of the selected pair
           </li>
           <li className={s.utils}>
+            {national.drawn > 0 ? <span><i style={{ background: "#88dbc1" }} /> National projects</span> : null}
             <span>
               <i style={{ background: COLOR.DESC }} /> Dominion SC
             </span>

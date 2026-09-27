@@ -10,8 +10,8 @@ lanes:
   C: { name: quality, agents: [qa-verifier, release-engineer, ceo] }
 # Ignored in paperclip mode. In hybrid mode, keep only locally assigned features here.
 local_workers:
-  claude-local: [F00, F05, F11, F14, F16, F19, F21]
-  codex-local: [F01, F02, F03, F04, F06, F07, F08, F09, F10, F12, F13, F15, F17, F18, F30, F31, F32, F33, F34, F35, F36, F37]
+  claude-local: [F00, F05, F11, F14, F16, F19, F21, F37, F40, F42]
+  codex-local: [F01, F02, F03, F04, F06, F07, F08, F09, F10, F12, F13, F15, F17, F18, F30, F31, F32, F33, F34, F35, F36, F38, F39, F41]
 frozen_paths:
   - schemas/
   - scripts/
@@ -101,11 +101,12 @@ Continuous status reports, final acceptance, submission draft, `STOP`.
 | F30 | Trusted national sources, Census geography, regional imports | A | data-researcher | 5 | F00 | never |
 | F31 | National explorer with state/county/region filters | B | frontend-engineer | 5 | F00 | never |
 | F32 | Optional AI app controls, separate prototype branch | B | gemini-engineer | 5 | F31 | allowed |
-| F37 | 3D History page and sourced project/contract events (spec only; implementation pending) | B | frontend-engineer | 6 | F19 | allowed |
+| F37 | 3D History page and sourced project/contract events (part 1 started 2026-09-27; award evidence pending) | B | frontend-engineer | 6 | F19 | allowed |
 | F33 | Verified EIA directory and evidence reconciliation | A | data-researcher | 6 | F00 | never |
 | F34 | Environmental evidence, current conditions and truck route adapters | A | geo-engineer | 6 | F00 | never |
 | F35 | Actual job outcomes, evaluated duration and delay estimates | B | technical-lead | 6 | F00 | never |
 | F36 | Field operations planning desk | B | frontend-engineer | 6 | F33, F34, F35 | never |
+| F38 | Verified geographic project data: Florida to contiguous US (spec only; launch pending) | A | data-researcher | 7 | F00, F30 | never |
 
 ## Authorized follow-on: national discovery
 
@@ -149,9 +150,78 @@ user starts that work and the shared-scene/data integration contract is accepted
 C15/F33–F36 ownership remain intact. A merged specification does not satisfy F37's completion criteria or claim
 that historical contracts have been acquired. Original run gates remain historical for this bounded spec task.
 
+2026-09-27: the user explicitly started F37 in a local Claude Code session. [C32](decisions/C32-history-navigation.md)
+moves F37 to claude-local (no codex-local F37 PR or branch existed) and adds the History nav item. F37 part 1 reads
+the existing loaders only; the shared-scene extraction stays deferred because F37 keeps its own layer and edits no
+F19 file. Award/contract evidence remains F37's unmet part 2.
+
+## Specified follow-on: verified geographic expansion
+
+[C22](decisions/C22-verified-geographic-data.md) and [F38](features/F38-verified-geographic-data/spec.md) capture the
+user's data-first request: verified project locations visibly filling the existing US map, beginning in Florida,
+then repairing/expanding Georgia, then the defined Southeast, then the 48 contiguous states plus DC. Alaska/Hawaii
+are stretch. Preserve current and documented historical work with distinct lifecycle/status evidence. A count of
+imported records or a list of regional sources does not satisfy location coverage.
+
+This authorizes specification delivery only. F38 is reserved to codex-local and is not eligible for autonomous pickup
+until the additive evidence/loader/API/map compatibility contract is accepted and the user explicitly launches the
+work. Its later run uses a newly recorded start/deadline, budget, source scope, independent reviewer and incremental
+PR checkpoints; the original run clock is historical. No overnight worker is started by this spec. Existing feature
+owners retain F06/F09/F13/F19/F30/F31/F37 paths, and root STOP/main-red rules remain binding.
+
+Data acquisition and independent identity/location verification are the main work. Minimal integration into existing
+maps is required so accepted points actually appear; redesign and new History interactions remain deferred. F37 still
+owns `/history`; F38's sourced observations/events may feed its accepted contract later. The F38 completion marker
+requires its source-bounded coverage and visible publication acceptance, not just an importer or a nationwide basemap.
+
 ## Original run critical path
 F00 → F01 + F02 (+F04) → F09 → F10 → F12, with F05 → F11 and F06 in parallel. If F09 is late at 4:30, geo
 narrows to the border-area projects (see F09 Defaults) rather than miss F10.
 
 ## Post-run (humans, morning)
 Read `reports/final.md`. Review `specs/decisions/*`, especially 000. Check the domain and the Devpost submission. Merge nothing overnight-generated that you haven't looked at into the event submission unless it's already on `main`.
+
+## Launched follow-on: complete Southeast coverage
+
+The user explicitly instructed Codex to continue until the entire Southeast is done. [C24](decisions/C24-southeast-launch.md)
+assigns [F39](features/F39-southeast/spec.md) to this local session, separate from F38's New England checkpoint.
+FL, GA, AL, MS, SC, NC, TN, KY, VA, WV, AR and LA remain the full objective. Florida is the publication pilot,
+followed by Georgia and the remaining states. Original run gates are historical for this launch. No deadline or
+token budget was requested; use resumable checkpoints without treating a checkpoint as completion.
+Existing F38 and shared-contract claims retain their owners. F39 cannot publish until the applicable shared
+contract and loader integration are accepted. Research can proceed independently during that integration.
+
+| ID | Feature | Lane | Agent | Phase | Depends on | Cut |
+|---|---|---|---|---|---|---|
+| F39 | Verified Southeast project coverage and geographic delivery | A | data-researcher | 7 | F00, F30 | never |
+
+## Launched follow-on: Texas
+
+The user assigned Texas to this Codex local session, separate from the active Southeast and Great Lakes workers.
+[F41](features/F41-texas/spec.md) starts a bounded public-source research checkpoint using the simplified official,
+candidate and area-only display tiers in [C25](decisions/C25-main-demo-map.md). Existing feature assignments remain.
+
+| ID | Feature | Lane | Agent | Phase | Depends on | Cut |
+|---|---|---|---|---|---|---|
+| F41 | Texas transmission project research and map delivery | A | data-researcher | 7 | F00, F30 | never |
+
+## Launched follow-on: Great Lakes coverage
+
+The user instructed Claude local to fill the map across the Great Lakes, starting with Minnesota, targeting ~5,000
+points, and chose a labeled candidate-location tier over the F38 review bar for this rollout. [C26](decisions/C26-great-lakes-candidates.md)
+assigns [F40](features/F40-great-lakes/spec.md): MN, WI, MI, IL, IN, OH, PA, NY. Candidates are never counted as verified.
+Publication uses a fixed F40 release appended by F30's owner, following C29.
+
+| ID | Feature | Lane | Agent | Phase | Depends on | Cut |
+|---|---|---|---|---|---|---|
+| F40 | Great Lakes project coverage with labeled candidate locations | A | data-researcher | 7 | F00, F30 | never |
+
+## Launched follow-on: Pacific Northwest coverage
+
+The user instructed Claude local to cover Washington, Oregon, Idaho and Montana and to loosen location review for
+the hackathon. [C33](decisions/C33-pacific-northwest.md) assigns [F42](features/F42-pacific-northwest/spec.md) with
+labeled official, candidate, unique-name candidate and county-reference tiers; none is counted as verified.
+
+| ID | Feature | Lane | Agent | Phase | Depends on | Cut |
+|---|---|---|---|---|---|---|
+| F42 | Pacific Northwest project coverage with loose labeled locations | A | data-researcher | 7 | F00, F30 | never |

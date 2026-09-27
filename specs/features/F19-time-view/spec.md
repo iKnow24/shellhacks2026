@@ -16,7 +16,9 @@ Added by the human after run 1's freeze (Plan E VIS-01..04, issue 23's 3D part o
 ## Plan
 1. `/time`: the overlap map on a dark basemap with a Three.js custom MapLibre layer. Each located current project
    stands on its center; its height is its filed in-service date on a vertical time axis.
-2. **Heights are display only.** Axis ground = 1 January of the earliest drawn year, declared on screen. Scale is
+2. **Heights are display only.** Axis ground = 1 January of the year before the analysis date (or the earliest drawn
+   year, if later), declared on screen. A filed date before the ground keeps its facts in every text and lies flat on
+   the ground, counted in the Projects tray; it never stretches the planning axis (2026-09-27, see below). Scale is
    pixels per year (user slider, shown), so it reads at any zoom. Height never feeds distance, overlap or rank.
 3. Exact dates draw as a bead on a light pillar. Month- or year-only dates draw as a column over the whole span; no day
    is picked. Unknown dates stay on the ground and are listed. Unlocated projects are counted, not drawn.
@@ -44,6 +46,10 @@ Motion and meaning, not more objects. Build order; each step ships only if the o
 12. **Loading.** The two-ring mark draws itself while the basemap loads.
 13. **List preview (issue #123).** Hovering or focusing a pair in the list lights its two pillars, draws its 25-mile
     circles and dims the rest before any click; a selected pair takes precedence.
+14. **Provenance and every project (F21 site structure).** Under the stats: the analysis date and source ids. The
+    "Projects" entry opens an All projects drawer: every current project, drawn ones selectable on the map and
+    unlocated ones listed with a hatched "no located endpoint", filterable by name or ID. Without WebGL the view says
+    so in one sentence, hides the 3D labels, and the pair list, detail card and drawer keep working.
 
 ## Requirements
 - Only stored values are shown: no recomputed distance or gap, no imputed dates. Review state shown as stored.
@@ -59,3 +65,24 @@ Motion and meaning, not more objects. Build order; each step ships only if the o
 
 ## Defaults
 - `three` pinned exactly via this feature's `[C9]`. Fonts via `next/font/google` scoped to the route.
+
+## National map integration (issue #139)
+
+The user's explicit follow-up assigns this bounded implementation to Codex under
+`specs/decisions/F19-national-map.md`. Fetch the active national projection used by `/explore` and
+render confirmed nonlegacy centers on `/time` by default. Preserve native IDs, actual owners,
+source lifecycle status, milestone precision and site/complete/partial endpoint evidence. Exclude
+national legacy projections and preserve stored pairs without calculating additional overlaps.
+
+Expose source and independent review evidence when selecting a national project. Disclose national
+unavailability and map truncation; link to the explorer for unlocated records. Default bounds include
+the delivered points. Validate projection/deduplication and date precision, desktop/mobile selection,
+2D/3D, navigation re-entry, fallback behavior and the repo-wide checks.
+
+## Planning window (2026-09-27)
+
+The user reported the axis running 2001–2035 after the national integration: 566 of the 612 drawn national records
+are ones their publisher lists as in service, dated 2001–2025, which pushed "today" to the top of the axis. `/time`
+plans and `/history` (F37) keeps the record, so `/time` now draws national records that are not in service; the
+in-service count links to History. The ground rule in step 2 bounds the axis to about 2025–2035 on the current data.
+Stored pairs, distances, gaps and rankings are unchanged. Each project card links to `/history?origin=<key>`.
